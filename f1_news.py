@@ -74,23 +74,43 @@ def fetch_feed_items():
     return items
 
 
+# Cap on how many posted IDs we retain, to keep state.json from growing forever.
+MAX_POSTED_IDS = 200
+
+
 def load_state():
-    """Load persisted state. Returns a dict containing a 'last_id' key."""
+    """Load persisted state. Returns a dict with a 'posted_ids' list.
+
+    Handles migration from the older {"last_id": "X"} format: the previous
+    marker is seeded into posted_ids so the existing backlog is not re-posted.
+    """
     if not os.path.exists(STATE_FILE):
-        return {"last_id": ""}
+        return {"posted_ids": []}
 
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as file:
             state = json.load(file)
         if not isinstance(state, dict):
-            return {"last_id": ""}
-        state.setdefault("last_id", "")
-        return state
+            return {"posted_ids": []}
+
+        # New format.
+        if isinstance(state.get("posted_ids"), list):
+            return {"posted_ids": [str(x) for x in state["posted_ids"] if x]}
+
+        # Migrate old single-marker format.
+        last_id = state.get("last_id")
+        if last_id:
+            return {"posted_ids": [str(last_id)]}
+
+        return {"posted_ids": []}
     except Exception:
-        return {"last_id": ""}
+        return {"posted_ids": []}
 
 
 def save_state(state):
+    # Keep only the most recent IDs to bound file growth.
+    posted = state.get("posted_ids", [])
+    state["posted_ids"] = posted[-MAX_POSTED_IDS:]
     with open(STATE_FILE, "w", encoding="utf-8") as file:
         json.dump(state, file, indent=2)
 
@@ -127,20 +147,24 @@ def post_to_discord(title, link):
 
 def main():
     state = load_state()
-    last_id = state.get("last_id", "")
+    posted_set = set(state.get("posted_ids", []))
 
     feed_items = fetch_feed_items()
     if not feed_items:
         print("No items found in the feed.")
         return
 
-    # The feed lists newest entries first. Walk from newest to oldest and stop
-    # once we reach the last item we already posted. Everything before that
-    # marker (i.e. already posted) is discarded.
+    # The feed is newest-first and contains duplicate entries (same id repeated).
+    # Collapse to unique ids while preserving feed order, then keep only the
+    # ones we have never posted before. Tracking a set (rather than a single
+    # marker) makes us resilient to duplicates and any reordering in the feed.
+    seen = set()
     new_items = []
     for item in feed_items:
-        if item["id"] == last_id:
-            break
+        item_id = item["id"]
+        if item_id in seen or item_id in posted_set:
+            continue
+        seen.add(item_id)
         new_items.append(item)
 
     if not new_items:
@@ -150,10 +174,9 @@ def main():
     # Post oldest-first so Discord shows items in chronological order.
     new_items.reverse()
 
-    posted_ids = []
     for index, item in enumerate(new_items):
         if post_to_discord(item["title"], item["link"]):
-            posted_ids.append(item["id"])
+            state["posted_ids"].append(item["id"])
             print(f"Successfully posted: {item['title']}")
         else:
             print(f"Skipping remaining items after failure on: {item['title']}", file=sys.stderr)
@@ -163,10 +186,7 @@ def main():
         if index < len(new_items) - 1:
             time.sleep(POST_DELAY_SECONDS)
 
-    if posted_ids:
-        # Newest successfully posted item becomes the new marker.
-        state["last_id"] = posted_ids[-1]
-        save_state(state)
+    save_state(state)
 
 
 if __name__ == "__main__":
