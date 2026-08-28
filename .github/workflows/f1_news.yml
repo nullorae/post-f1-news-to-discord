@@ -18,7 +18,7 @@ jobs:
           import json
           import os
 
-          url = 'https://motorsport.com'
+          url = 'https://skysports.com'
           webhook_url = os.environ['DISCORD_WEBHOOK']
 
           try:
