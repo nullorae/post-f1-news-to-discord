@@ -64,7 +64,7 @@ def fetch_latest_item():
 
 def post_to_discord(title, link):
     payload = {
-        "username": "F1 News",
+        "username": "F1-News",
         "content": f"🏎️ **{title}**\n{link}",
         "allowed_mentions": {"parse": []},
     }
