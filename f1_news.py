@@ -1,6 +1,7 @@
 import json
 import os
 import urllib.request
+import urllib.error
 import xml.etree.ElementTree as ET
 
 # Replace this with an RSS or Atom feed URL from an F1 news publisher
@@ -64,7 +65,7 @@ def fetch_latest_item():
 
 def post_to_discord(title, link):
     payload = {
-        "username": "F1-News",
+        "username": "F1 News",
         "content": f"🏎️ **{title}**\n{link}",
         "allowed_mentions": {"parse": []},
     }
@@ -72,13 +73,22 @@ def post_to_discord(title, link):
     request = urllib.request.Request(
         WEBHOOK_URL,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "DiscordBot (github.com/nullorae/post-f1-news-to-discord, 1.0)",
+        },
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=30) as response:
-        if response.status not in (200, 204):
-            raise RuntimeError(f"Discord returned HTTP {response.status}")
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            if response.status not in (200, 204):
+                print(f"Discord returned HTTP status {response.status}", file=sys.stderr)
+                sys.exit(1)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        print(f"Discord HTTPError {exc.code}: {body}", file=sys.stderr)
+        sys.exit(1)
 
 
 def main():
