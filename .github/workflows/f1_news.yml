@@ -1,29 +1,56 @@
 name: Fetch F1 News
 on:
   schedule:
-    - cron: '0 */2 * * *' # Automatically runs every 2 hours
-  workflow_dispatch: # Allows you to manually click "Run workflow"
+    - cron: '0 */2 * * *' # Checks for news every 2 hours
+  workflow_dispatch: # Allows you to manually trigger it
 
 jobs:
   f1_news_to_discord:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch RSS and Post to Discord
+      - name: Fetch RSS and Post to Discord (Python)
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          # Fetch the latest 3 F1 headlines & links from the free feed
-          FEED_DATA=$(curl -s https://motorsport.com)
-          
-          # Extract titles and URLs using standard text filtering
-          echo "$FEED_DATA" | grep -oP '(?<=<item>).*?(?=</item>)' | head -n 3 | while read -r item; do
-            TITLE=$(echo "$item" | grep -oP '(?<=<title><!\[CDATA\[).*?(?=\]\]></title>)' || echo "$item" | grep -oP '(?<=<title>).*?(?=</title>)')
-            LINK=$(echo "$item" | grep -oP '(?<=<link>).*?(?=</link>)')
-            
-            # Format the text message nicely for Discord
-            MESSAGE="🏎️ **New F1 Article:** $TITLE \n🔗 $LINK"
-            
-            # Send it directly to your Discord webhook
-            curl -H "Content-Type: application/json" \
-                 -X POST \
-                 -d "{\"content\": \"$MESSAGE\"}" \
-                 ${{ secrets.DISCORD_WEBHOOK }}
-          done
+          python3 -c "
+          import urllib.request
+          import xml.etree.ElementTree as ET
+          import json
+          import os
+
+          url = 'https://motorsport.com'
+          webhook_url = os.environ['DISCORD_WEBHOOK']
+
+          try:
+              # Fetch the RSS feed
+              req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+              with urllib.request.urlopen(req) as response:
+                  xml_data = response.read()
+              
+              # Parse the XML data structure
+              root = ET.fromstring(xml_data)
+              items = root.findall('.//item')[:3] # Grabs the 3 newest articles
+
+              for item in items:
+                  title = item.find('title').text
+                  link = item.find('link').text
+                  
+                  # Clean up CDATA if present in the title string
+                  if title.startswith('<![CDATA['):
+                      title = title[9:-3]
+
+                  message = f'🏎️ **New F1 Article:** {title}\n🔗 {link}'
+                  
+                  # Send payload to Discord Webhook
+                  payload = json.dumps({'content': message}).encode('utf-8')
+                  disc_req = urllib.request.Request(
+                      webhook_url, 
+                      data=payload, 
+                      headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'}
+                  )
+                  urllib.request.urlopen(disc_req)
+                  print(f'Successfully sent: {title}')
+                  
+          except Exception as e:
+              print(f'Error processing feed: {e}')
+          "
