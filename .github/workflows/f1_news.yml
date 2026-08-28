@@ -1,0 +1,15 @@
+name: Fetch F1 News
+on:
+  schedule:
+    - cron: '0 */2 * * *' # Checks for news every 2 hours for free
+  workflow_dispatch: # Allows you to test it manually
+
+jobs:
+  feed2discord:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch and Post F1 News
+        uses: maxgfr/github-action-rss-to-discord@v1
+        with:
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
+          feed_url: 'https://motorsport.com' # Free F1 News Feed
