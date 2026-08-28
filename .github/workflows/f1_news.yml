@@ -1,22 +1,29 @@
 name: Fetch F1 News
 on:
   schedule:
-    - cron: '0 */2 * * *' # Checks for news every 2 hours
-  workflow_dispatch: # Allows you to test it manually
+    - cron: '0 */2 * * *' # Automatically runs every 2 hours
+  workflow_dispatch: # Allows you to manually click "Run workflow"
 
 jobs:
-  feed2discord:
+  f1_news_to_discord:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch and Post F1 News
-        uses: tgagor/crosspost-action@v1.6.6
-        with:
-          # Your Discord Webhook from your GitHub Secrets
-          discord-url: ${{ secrets.DISCORD_WEBHOOK }}
+      - name: Fetch RSS and Post to Discord
+        run: |
+          # Fetch the latest 3 F1 headlines & links from the free feed
+          FEED_DATA=$(curl -s https://motorsport.com)
           
-          # Free F1 News Feed
-          rss-url: 'https://motorsport.com'
-          
-          # Only post articles published in the last 2 hours to avoid spamming
-          since: '2'
-          since-unit: 'hour'
+          # Extract titles and URLs using standard text filtering
+          echo "$FEED_DATA" | grep -oP '(?<=<item>).*?(?=</item>)' | head -n 3 | while read -r item; do
+            TITLE=$(echo "$item" | grep -oP '(?<=<title><!\[CDATA\[).*?(?=\]\]></title>)' || echo "$item" | grep -oP '(?<=<title>).*?(?=</title>)')
+            LINK=$(echo "$item" | grep -oP '(?<=<link>).*?(?=</link>)')
+            
+            # Format the text message nicely for Discord
+            MESSAGE="🏎️ **New F1 Article:** $TITLE \n🔗 $LINK"
+            
+            # Send it directly to your Discord webhook
+            curl -H "Content-Type: application/json" \
+                 -X POST \
+                 -d "{\"content\": \"$MESSAGE\"}" \
+                 ${{ secrets.DISCORD_WEBHOOK }}
+          done
