@@ -1,8 +1,8 @@
-name: Post F1 news to Discord
+name: Post F1 News to Discord
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -11,20 +11,18 @@ permissions:
 jobs:
   post-news:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Run F1 news bot
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python f1_news.py
 
-      - name: Save latest posted article
+      - name: Commit updated state
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add state.json
-          git diff --cached --quiet || git commit -m "Update last posted F1 article"
+          git diff --cached --quiet || git commit -m "chore: update state.json"
           git push
