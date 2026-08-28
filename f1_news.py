@@ -6,9 +6,11 @@ import xml.etree.ElementTree as ET
 
 # Replace this with an RSS or Atom feed URL from an F1 news publisher
 FEED_URL = "https://f1tv-rss.vercel.app/api/rss"
-
-WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
 STATE_FILE = "state.json"
+
+# Prevent a large backlog from flooding Discord on the first run.
+MAX_POSTS_PER_RUN = 5
+POST_DELAY_SECONDS = 1
 
 
 def text_of(element, tag):
@@ -18,10 +20,19 @@ def text_of(element, tag):
 
 def load_state():
     if not os.path.exists(STATE_FILE):
-        return {"last_id": ""}
+        return {"seen_ids": []}
 
-    with open(STATE_FILE, "r", encoding="utf-8") as file:
-        return json.load(file)
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as file:
+            state = json.load(file)
+
+        if "seen_ids" not in state:
+            last_id = state.get("last_id", "")
+            state = {"seen_ids": [last_id] if last_id else []}
+
+        return state
+    except Exception:
+        return {"seen_ids": []}
 
 
 def save_state(state):
@@ -29,38 +40,50 @@ def save_state(state):
         json.dump(state, file, indent=2)
 
 
-def fetch_latest_item():
+def fetch_feed_items():
     request = urllib.request.Request(
         FEED_URL,
-        headers={"User-Agent": "F1-Discord-News-Bot/1.0"},
+        headers={"User-Agent": "Mozilla/5.0 (compatible; F1DiscordBot/1.0)"},
     )
 
-    with urllib.request.urlopen(request, timeout=30) as response:
-        xml_data = response.read()
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            xml_data = response.read()
+    except Exception as exc:
+        print(f"Failed to fetch feed from {FEED_URL}: {exc}", file=sys.stderr)
+        sys.exit(1)
 
-    root = ET.fromstring(xml_data)
+    try:
+        root = ET.fromstring(xml_data)
+    except Exception as exc:
+        print(f"Failed to parse XML: {exc}", file=sys.stderr)
+        sys.exit(1)
 
-    # RSS feed support
-    item = root.find("./channel/item")
-    if item is not None:
+    items = []
+    unique_ids = set()
+
+    for item in root.findall("./channel/item"):
         title = text_of(item, "title")
         link = text_of(item, "link")
         item_id = text_of(item, "guid") or link or title
-        return item_id, title, link
 
-    # Atom feed support
-    atom_namespace = {"atom": "http://www.w3.org/2005/Atom"}
-    entry = root.find("atom:entry", atom_namespace)
-    if entry is not None:
-        title = text_of(entry, "{http://www.w3.org/2005/Atom}title")
-        item_id = text_of(entry, "{http://www.w3.org/2005/Atom}id") or title
+        if not item_id or item_id in unique_ids:
+            continue
 
-        link_element = entry.find("atom:link", atom_namespace)
-        link = link_element.attrib.get("href", "") if link_element is not None else ""
+        unique_ids.add(item_id)
+        items.append(
+            {
+                "id": item_id,
+                "title": title,
+                "link": link,
+            }
+        )
 
-        return item_id, title, link
+    if not items:
+        print("Error: No valid RSS items found.", file=sys.stderr)
+        sys.exit(1)
 
-    raise RuntimeError("No RSS item or Atom entry was found in the feed.")
+    return items
 
 
 def post_to_discord(title, link):
@@ -93,16 +116,28 @@ def post_to_discord(title, link):
 
 def main():
     state = load_state()
-    item_id, title, link = fetch_latest_item()
+    seen_ids = set(state.get("seen_ids", []))
 
-    if item_id == state.get("last_id"):
-        print("No new article.")
+    feed_items = fetch_feed_items()
+
+    # RSS feeds normally place newest posts first. Reverse the unseen posts
+    # so Discord receives them oldest to newest.
+    new_items = [item for item in reversed(feed_items) if item["id"] not in seen_ids]
+    items_to_post = new_items[:MAX_POSTS_PER_RUN]
+
+    if not items_to_post:
+        print("No new items since the last run.")
         return
 
-    post_to_discord(title, link)
-    save_state({"last_id": item_id})
-    print(f"Posted: {title}")
+    for item in items_to_post:
+        post_to_discord(item["title"], item["link"])
+        seen_ids.add(item["id"])
+        print(f"Successfully posted: {item['title']}")
+        time.sleep(POST_DELAY_SECONDS)
 
+    # Retain a bounded history so state.json does not grow forever.
+    state["seen_ids"] = list(seen_ids)[-500:]
+    save_state(state)
 
 if __name__ == "__main__":
     main()
