@@ -4,7 +4,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 # Replace this with an RSS or Atom feed URL from an F1 news publisher
-FEED_URL = "https://f1tv-rss.vercel.app"
+FEED_URL = "https://f1tv-rss.vercel.app/api/rss"
 
 WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
 STATE_FILE = "state.json"
