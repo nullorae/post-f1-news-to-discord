@@ -42,6 +42,9 @@ def save_state(state):
         json.dump(state, file, indent=2)
 
 
+ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
+
+
 def fetch_feed_items():
     request = urllib.request.Request(
         FEED_URL,
@@ -64,25 +67,45 @@ def fetch_feed_items():
     items = []
     unique_ids = set()
 
-    for item in root.findall("./channel/item"):
-        title = text_of(item, "title")
-        link = text_of(item, "link")
-        item_id = text_of(item, "guid") or link or title
+    # Try RSS 2.0 <channel><item> first.
+    rss_items = root.findall("./channel/item")
 
-        if not item_id or item_id in unique_ids:
-            continue
+    if rss_items:
+        for item in rss_items:
+            title = text_of(item, "title")
+            link = text_of(item, "link")
+            item_id = text_of(item, "guid") or link or title
 
-        unique_ids.add(item_id)
-        items.append(
-            {
-                "id": item_id,
-                "title": title,
-                "link": link,
-            }
-        )
+            if not item_id or item_id in unique_ids:
+                continue
+
+            unique_ids.add(item_id)
+            items.append({"id": item_id, "title": title, "link": link})
+    else:
+        # Fall back to Atom <feed><entry>.
+        for entry in root.findall("atom:entry", ATOM_NS):
+            title_elem = entry.find("atom:title", ATOM_NS)
+            title = title_elem.text.strip() if title_elem is not None and title_elem.text else ""
+
+            id_elem = entry.find("atom:id", ATOM_NS)
+            item_id = id_elem.text.strip() if id_elem is not None and id_elem.text else ""
+
+            link = ""
+            for link_elem in entry.findall("atom:link", ATOM_NS):
+                if link_elem.attrib.get("rel") in (None, "alternate"):
+                    link = link_elem.attrib.get("href", "")
+                    break
+
+            item_id = item_id or link or title
+
+            if not item_id or item_id in unique_ids:
+                continue
+
+            unique_ids.add(item_id)
+            items.append({"id": item_id, "title": title, "link": link})
 
     if not items:
-        print("Error: No valid RSS items found.", file=sys.stderr)
+        print("Error: No valid RSS items or Atom entries found.", file=sys.stderr)
         sys.exit(1)
 
     return items
