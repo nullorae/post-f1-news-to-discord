@@ -119,7 +119,7 @@ def post_to_discord(title, link):
     }
 
     request = urllib.request.Request(
-        WEBHOOK_URL,
+        DISCORD_WEBHOOK_URL,
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
